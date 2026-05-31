@@ -57,6 +57,19 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByText('Body copy.')).toBeInTheDocument()
   })
 
+  it('gives default markdown lists enough inset to keep bullets inside message cards', () => {
+    const { container } = render(
+      <MarkdownRenderer content={'- First item\n- Second item'} />,
+    )
+
+    const root = container.firstChild as HTMLDivElement
+    expect(root.className).toContain('prose-ul:pl-5')
+    expect(root.className).toContain('prose-ol:pl-5')
+    expect(root.className).toContain('prose-ul:list-outside')
+    expect(root.className).toContain('prose-ol:list-outside')
+    expect(screen.getByText('First item')).toBeInTheDocument()
+  })
+
   it('applies compact prose classes for dense surfaces', () => {
     const { container } = render(
       <MarkdownRenderer

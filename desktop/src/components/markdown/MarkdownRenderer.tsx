@@ -414,7 +414,7 @@ const BASE_PROSE_CLASSES = `markdown-prose prose prose-sm min-w-0 max-w-none bre
   prose-pre:!bg-transparent prose-pre:!p-0 prose-pre:!shadow-none
   prose-a:text-[var(--color-text-accent)] prose-a:no-underline prose-a:[overflow-wrap:anywhere] hover:prose-a:underline
   prose-strong:text-[var(--color-text-primary)]
-  prose-ul:my-2 prose-ol:my-2
+  prose-ul:my-2 prose-ol:my-2 prose-ul:pl-5 prose-ol:pl-5 prose-ul:list-outside prose-ol:list-outside
   prose-li:my-0.5
   prose-table:my-0 prose-table:w-full prose-table:table-auto prose-table:text-sm
   prose-th:bg-[var(--color-surface-info)] prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:whitespace-normal prose-th:break-words prose-th:align-top prose-th:border-b prose-th:border-[var(--color-border)]
