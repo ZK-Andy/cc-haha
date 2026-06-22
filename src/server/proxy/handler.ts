@@ -271,6 +271,10 @@ async function handleOpenaiChat(
     imageContentMode: shouldUseTextOnlyOpenAIChatContent(baseUrl) ? 'text_only' : 'vision',
   })
   const url = `${baseUrl}/v1/chat/completions`
+  const upstreamRequestHeaders = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  }
   const proxyOptions = getProxyFetchOptions({ proxyUrl })
   const startedAtMs = Date.now()
   const startedAt = new Date(startedAtMs).toISOString()
@@ -280,6 +284,7 @@ async function handleOpenaiChat(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
       })
     : undefined
@@ -288,10 +293,7 @@ async function handleOpenaiChat(
   try {
     upstream = await fetchUpstreamWithTimeout(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: upstreamRequestHeaders,
       body: JSON.stringify(transformed),
       ...proxyOptions,
     }, aiRequestTimeoutMs, isStream)
@@ -303,6 +305,7 @@ async function handleOpenaiChat(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
         startedAtMs,
         error: err,
@@ -328,6 +331,7 @@ async function handleOpenaiChat(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
         startedAtMs,
         responseStatus: upstream.status,
@@ -351,6 +355,7 @@ async function handleOpenaiChat(
           model: body.model,
           upstreamUrl: url,
           upstreamRequest: transformed,
+          requestHeaders: upstreamRequestHeaders,
           startedAt,
           startedAtMs,
           error: new Error('Upstream returned no body for stream'),
@@ -371,6 +376,7 @@ async function handleOpenaiChat(
             model: body.model,
             upstreamUrl: url,
             upstreamRequest: transformed,
+            requestHeaders: upstreamRequestHeaders,
             startedAt,
             startedAtMs,
             responseStatus: 200,
@@ -400,6 +406,7 @@ async function handleOpenaiChat(
       model: body.model,
       upstreamUrl: url,
       upstreamRequest: transformed,
+      requestHeaders: upstreamRequestHeaders,
       startedAt,
       startedAtMs,
       responseStatus: 200,
@@ -434,6 +441,10 @@ async function handleOpenaiResponses(
 ): Promise<Response> {
   const transformed = anthropicToOpenaiResponses(body, { cacheKey: promptCacheKey })
   const url = `${baseUrl}/v1/responses`
+  const upstreamRequestHeaders = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  }
   const proxyOptions = getProxyFetchOptions({ proxyUrl })
   const startedAtMs = Date.now()
   const startedAt = new Date(startedAtMs).toISOString()
@@ -443,6 +454,7 @@ async function handleOpenaiResponses(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
       })
     : undefined
@@ -451,10 +463,7 @@ async function handleOpenaiResponses(
   try {
     upstream = await fetchUpstreamWithTimeout(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: upstreamRequestHeaders,
       body: JSON.stringify(transformed),
       ...proxyOptions,
     }, aiRequestTimeoutMs, isStream)
@@ -466,6 +475,7 @@ async function handleOpenaiResponses(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
         startedAtMs,
         error: err,
@@ -491,6 +501,7 @@ async function handleOpenaiResponses(
         model: body.model,
         upstreamUrl: url,
         upstreamRequest: transformed,
+        requestHeaders: upstreamRequestHeaders,
         startedAt,
         startedAtMs,
         responseStatus: upstream.status,
@@ -514,6 +525,7 @@ async function handleOpenaiResponses(
           model: body.model,
           upstreamUrl: url,
           upstreamRequest: transformed,
+          requestHeaders: upstreamRequestHeaders,
           startedAt,
           startedAtMs,
           error: new Error('Upstream returned no body for stream'),
@@ -534,6 +546,7 @@ async function handleOpenaiResponses(
             model: body.model,
             upstreamUrl: url,
             upstreamRequest: transformed,
+            requestHeaders: upstreamRequestHeaders,
             startedAt,
             startedAtMs,
             responseStatus: 200,
@@ -563,6 +576,7 @@ async function handleOpenaiResponses(
       model: body.model,
       upstreamUrl: url,
       upstreamRequest: transformed,
+      requestHeaders: upstreamRequestHeaders,
       startedAt,
       startedAtMs,
       responseStatus: 200,
@@ -608,12 +622,14 @@ function startProxyTraceCall({
   model,
   upstreamUrl,
   upstreamRequest,
+  requestHeaders,
   startedAt,
 }: {
   context: ProxyTraceContext
   model: string
   upstreamUrl: string
   upstreamRequest: unknown
+  requestHeaders: Record<string, string>
   startedAt: string
 }): string {
   const callId = createTraceCallId()
@@ -628,6 +644,7 @@ function startProxyTraceCall({
     request: {
       method: 'POST',
       url: upstreamUrl,
+      headers: requestHeaders,
       bodySnapshot: createTraceBodySnapshot({
         pending: true,
         note: 'proxy request body captured on call completion',
@@ -660,6 +677,7 @@ async function recordProxyTrace({
   model,
   upstreamUrl,
   upstreamRequest,
+  requestHeaders,
   startedAt,
   startedAtMs,
   responseStatus,
@@ -674,6 +692,7 @@ async function recordProxyTrace({
   model: string
   upstreamUrl: string
   upstreamRequest: unknown
+  requestHeaders?: Record<string, string>
   startedAt: string
   startedAtMs: number
   responseStatus?: number
@@ -704,6 +723,7 @@ async function recordProxyTrace({
     request: {
       method: 'POST',
       url: upstreamUrl,
+      headers: requestHeaders,
       body: requestBody,
     },
     ...(responseStatus !== undefined

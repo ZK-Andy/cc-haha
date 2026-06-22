@@ -186,6 +186,78 @@ describe('stripGeneratedImageMetadataLines', () => {
   })
 })
 
+describe('chatStore tool settlement', () => {
+  beforeEach(() => {
+    sendMock.mockReset()
+    updateTabStatusMock.mockReset()
+    notifyDesktopMock.mockReset()
+    localStorage.clear()
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+      },
+    })
+  })
+
+  it('marks sibling pending tool calls stopped when a parallel tool result fails and the turn completes', () => {
+    const store = useChatStore.getState()
+
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'tool_use',
+      toolName: 'Grep',
+      toolUseId: 'grep-1',
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'Grep',
+      toolUseId: 'grep-1',
+      input: { pattern: 'needle' },
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'tool_use',
+      toolName: 'Read',
+      toolUseId: 'read-1',
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'Read',
+      toolUseId: 'read-1',
+      input: { file_path: '/missing.md' },
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_result',
+      toolUseId: 'read-1',
+      content: 'File does not exist',
+      isError: true,
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 1, output_tokens: 0 },
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session).toBeTruthy()
+    if (!session) return
+    const grep = session.messages.find((message) =>
+      message.type === 'tool_use' && message.toolUseId === 'grep-1',
+    )
+    const read = session.messages.find((message) =>
+      message.type === 'tool_use' && message.toolUseId === 'read-1',
+    )
+
+    expect(read).toMatchObject({ type: 'tool_use', isPending: false })
+    expect(grep).toMatchObject({
+      type: 'tool_use',
+      isPending: false,
+      status: 'stopped',
+    })
+    expect(session.chatState).toBe('idle')
+  })
+})
+
 describe('chatStore history mapping', () => {
   beforeEach(() => {
     sendMock.mockReset()

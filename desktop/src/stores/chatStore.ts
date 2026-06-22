@@ -357,9 +357,19 @@ function upsertToolUseMessage(
 }
 
 function markPendingToolUseMessagesStopped(messages: UIMessage[]): UIMessage[] {
+  const resolvedToolUseIds = new Set(
+    messages
+      .filter((message) => message.type === 'tool_result')
+      .map((message) => message.toolUseId),
+  )
   let changed = false
   const stoppedMessages = messages.map((message) => {
-    if (message.type !== 'tool_use' || !message.isPending) return message
+    if (
+      message.type !== 'tool_use' ||
+      (!message.isPending && resolvedToolUseIds.has(message.toolUseId))
+    ) {
+      return message
+    }
     changed = true
     return {
       ...message,
@@ -1893,8 +1903,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         } else if (text !== session.streamingText) {
           update(() => ({ streamingText: text }))
         }
+        const appendedCompletionMessage = completionMessages !== session.messages
+        const finalMessages = markPendingToolUseMessagesStopped(completionMessages)
         if (session.elapsedTimer) clearInterval(session.elapsedTimer)
         update(() => ({
+          messages: finalMessages,
           tokenUsage: msg.usage,
           chatState: 'idle',
           activeThinkingId: null,
@@ -1905,9 +1918,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamingFallback: null,
         }))
         useTabStore.getState().updateTabStatus(sessionId, 'idle')
-        const appendedCompletionMessage = completionMessages !== session.messages
         const notification = wasAgentRunning && appendedCompletionMessage
-          ? buildAgentCompletionNotification(sessionId, completionMessages, text)
+          ? buildAgentCompletionNotification(sessionId, finalMessages, text)
           : null
         if (notification) {
           void notifyDesktop({
