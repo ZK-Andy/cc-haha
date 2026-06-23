@@ -1574,6 +1574,58 @@ describe('ProviderService', () => {
       }
     })
 
+    test('bypasses manual proxy options when testing loopback provider endpoints', async () => {
+      await fs.writeFile(
+        path.join(tmpDir, 'settings.json'),
+        JSON.stringify({
+          network: {
+            proxy: { mode: 'manual', url: 'http://127.0.0.1:1181' },
+          },
+        }),
+        'utf-8',
+      )
+      const originalFetch = globalThis.fetch
+      const calls: Array<{ url: string; proxy?: string }> = []
+      globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          url: String(url),
+          proxy: (init as RequestInit & { proxy?: string } | undefined)?.proxy,
+        })
+        return new Response(JSON.stringify({
+          id: 'chatcmpl-1',
+          object: 'chat.completion',
+          created: 0,
+          model: 'local-model',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }) as typeof fetch
+
+      try {
+        const svc = new ProviderService()
+        const result = await svc.testProviderConfig({
+          baseUrl: 'http://127.0.0.1:11434',
+          apiKey: 'local-key',
+          modelId: 'local-model',
+          authStrategy: 'api_key',
+          apiFormat: 'openai_chat',
+        })
+
+        expect(result.connectivity.success).toBe(true)
+        expect(result.proxy?.success).toBe(true)
+        expect(calls.map((call) => call.url)).toEqual([
+          'http://127.0.0.1:11434/v1/chat/completions',
+          'http://127.0.0.1:11434/v1/chat/completions',
+        ])
+        expect(calls.map((call) => call.proxy)).toEqual([undefined, undefined])
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
     test('should use configured network timeout for provider tests', async () => {
       await fs.writeFile(
         path.join(tmpDir, 'settings.json'),

@@ -86,7 +86,7 @@ export function getManualNetworkProxyUrl(settings: NetworkSettings): string | un
   return url || undefined
 }
 
-function mergeLoopbackNoProxy(existing: string | undefined): string {
+export function mergeLoopbackNoProxy(existing: string | undefined): string {
   const entries = (existing ?? '')
     .split(/[,\s]+/)
     .map(entry => entry.trim())

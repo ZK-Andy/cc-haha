@@ -96,19 +96,36 @@ export function shouldBypassProxy(
 
   try {
     const url = new URL(urlString)
-    const hostname = url.hostname.toLowerCase()
+    const rawHostname = url.hostname.toLowerCase()
+    const hostname = rawHostname.startsWith('[') && rawHostname.endsWith(']')
+      ? rawHostname.slice(1, -1)
+      : rawHostname
     const port = url.port || (url.protocol === 'https:' ? '443' : '80')
     const hostWithPort = `${hostname}:${port}`
+    const bracketedHostWithPort = hostname.includes(':') ? `[${hostname}]:${port}` : hostWithPort
 
     // Split by comma or space and trim each entry
     const noProxyList = noProxy.split(/[,\s]+/).filter(Boolean)
 
     return noProxyList.some(pattern => {
       pattern = pattern.toLowerCase().trim()
+      const normalizedPattern = pattern.startsWith('[') && pattern.endsWith(']')
+        ? pattern.slice(1, -1)
+        : pattern
 
       // Check for port-specific match
       if (pattern.includes(':')) {
-        return hostWithPort === pattern
+        const bracketedPortMatch = pattern.match(/^\[(.+)]:(\d+)$/)
+        if (bracketedPortMatch) {
+          return hostname === bracketedPortMatch[1] && port === bracketedPortMatch[2]
+        }
+
+        const colonCount = (pattern.match(/:/g) ?? []).length
+        if (colonCount === 1) {
+          return hostWithPort === pattern || bracketedHostWithPort === pattern
+        }
+
+        return hostname === normalizedPattern
       }
 
       // Check for domain suffix match (with or without leading dot)
@@ -120,7 +137,7 @@ export function shouldBypassProxy(
       }
 
       // Check for exact hostname match or IP address
-      return hostname === pattern
+      return hostname === normalizedPattern
     })
   } catch {
     // If URL parsing fails, don't bypass proxy
@@ -128,9 +145,9 @@ export function shouldBypassProxy(
   }
 }
 
-function shouldBypassProxyForTarget(targetUrl: string | URL | undefined | null): boolean {
+function shouldBypassProxyForTarget(targetUrl: string | URL | undefined | null, noProxy?: string | null): boolean {
   if (!targetUrl) return false
-  return shouldBypassProxy(String(targetUrl))
+  return shouldBypassProxy(String(targetUrl), noProxy ?? undefined)
 }
 
 /**
@@ -290,7 +307,7 @@ export function getWebSocketProxyUrl(url: string): string | undefined {
  *   requests get misrouted to api.anthropic.com. Only the Anthropic SDK client
  *   should pass `true` here.
  */
-export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean; proxyUrl?: string | null; targetUrl?: string | URL | null }): {
+export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean; proxyUrl?: string | null; targetUrl?: string | URL | null; noProxy?: string | null }): {
   tls?: TLSConfig
   dispatcher?: undici.Dispatcher
   proxy?: string
@@ -313,7 +330,7 @@ export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean; proxyUr
     ? opts.proxyUrl || undefined
     : getProxyUrl()
 
-  if (proxyUrl && shouldBypassProxyForTarget(opts?.targetUrl)) {
+  if (proxyUrl && shouldBypassProxyForTarget(opts?.targetUrl, opts?.noProxy)) {
     return { ...base, ...getTLSFetchOptions() }
   }
 
