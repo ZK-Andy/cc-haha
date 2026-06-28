@@ -244,10 +244,9 @@ function mergeSessionList(
   for (const item of incoming) {
     const current = currentById.get(item.id)
     const candidate = preserveLocalTitle(current, item)
-    const merged = preserveStaleModifiedAt(current, candidate)
-    const existing = byId.get(merged.id)
-    if (!existing || sessionModifiedTime(merged) > sessionModifiedTime(existing)) {
-      byId.set(merged.id, merged)
+    const existing = byId.get(candidate.id)
+    if (!existing || sessionModifiedTime(candidate) > sessionModifiedTime(existing)) {
+      byId.set(candidate.id, candidate)
     }
   }
 
@@ -266,21 +265,6 @@ function preserveLocalTitle(
   if (!current) return incoming
   if (isPlaceholderSessionTitle(incoming.title) && !isPlaceholderSessionTitle(current.title)) {
     return { ...incoming, title: current.title }
-  }
-  return incoming
-}
-
-function preserveStaleModifiedAt(
-  current: SessionListItem | undefined,
-  incoming: SessionListItem,
-): SessionListItem {
-  if (!current) return incoming
-  // Preserve modifiedAt when the effective title hasn't changed — indicates no meaningful
-  // content change.  messageCount is NOT used here because listSessions always returns 0
-  // (a placeholder for performance), while fetchSessionSummary returns the real count,
-  // so comparing them would always fail and defeat the preservation logic.
-  if (current.title === incoming.title) {
-    return { ...incoming, modifiedAt: current.modifiedAt }
   }
   return incoming
 }
