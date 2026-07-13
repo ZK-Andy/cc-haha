@@ -59,6 +59,7 @@ import { useTabStore } from '../../stores/tabStore'
 import { useUIStore } from '../../stores/uiStore'
 
 const initialSetSessionPermissionMode = useChatStore.getState().setSessionPermissionMode
+const initialAcceptAutoModeOptIn = useSettingsStore.getState().acceptAutoModeOptIn
 
 function makeChatSession(chatState: PerSessionState['chatState']): PerSessionState {
   return {
@@ -85,7 +86,11 @@ function makeChatSession(chatState: PerSessionState['chatState']): PerSessionSta
 describe('PermissionModeSelector', () => {
   beforeEach(() => {
     viewportMocks.isMobile = false
-    useSettingsStore.setState({ permissionMode: 'default' })
+    useSettingsStore.setState({
+      permissionMode: 'default',
+      autoModeOptInAccepted: false,
+      acceptAutoModeOptIn: initialAcceptAutoModeOptIn,
+    })
     useChatStore.setState({
       sessions: {},
       setSessionPermissionMode: initialSetSessionPermissionMode,
@@ -484,6 +489,28 @@ describe('PermissionModeSelector', () => {
       expect(acceptAutoModeOptIn).toHaveBeenCalledOnce()
       expect(onChange).toHaveBeenCalledWith('auto')
     })
+  })
+
+  it('confirms every entry into Auto without rewriting prior consent', async () => {
+    const onChange = vi.fn()
+    const acceptAutoModeOptIn = vi.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({
+      autoModeOptInAccepted: true,
+      acceptAutoModeOptIn,
+    } as never)
+
+    render(<PermissionModeSelector value="default" onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith('auto'))
+    expect(acceptAutoModeOptIn).not.toHaveBeenCalled()
   })
 
   it('applies first-use Auto consent to the active session', async () => {

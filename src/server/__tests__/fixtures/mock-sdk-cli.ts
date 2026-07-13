@@ -203,6 +203,19 @@ ws.addEventListener('message', (event) => {
       }
 
       if (parsed.type === 'control_request' && parsed.request?.subtype === 'set_permission_mode') {
+        if (permissionModeBehavior === 'unavailable') {
+          emit(ws, {
+            type: 'control_response',
+            response: {
+              subtype: 'error',
+              request_id: parsed.request_id,
+              error:
+                'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions',
+            },
+            session_id: sessionId,
+          })
+          continue
+        }
         if (permissionModeBehavior === 'status-before-reject') {
           emit(ws, {
             type: 'system',

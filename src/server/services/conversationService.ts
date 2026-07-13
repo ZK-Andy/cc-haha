@@ -1109,7 +1109,11 @@ export class ConversationService {
       return ['--dangerously-skip-permissions']
     }
 
-    const args = ['--permission-mode', resolvedMode]
+    const args = [
+      '--allow-dangerously-skip-permissions',
+      '--permission-mode',
+      resolvedMode,
+    ]
     return args
   }
 

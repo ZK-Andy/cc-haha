@@ -758,28 +758,26 @@ async function handleSetPermissionMode(
     return
   }
 
-  await applyPermissionModeToActiveSession(ws, sessionId, message.mode)
+  await enqueueRuntimeTransition(sessionId, () =>
+    applyPermissionModeToActiveSession(ws, sessionId, message.mode),
+  )
 }
 
+const BYPASS_CAPABILITY_UNAVAILABLE =
+  'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions'
+
 /**
- * 决定一次权限模式切换是否需要重启 CLI 子进程。
- *
- * 只有"进入 bypassPermissions"才需要重启：CLI 必须带 --dangerously-skip-permissions
- * 启动，否则运行时的 set_permission_mode → bypassPermissions 会被拒绝，所以重启子进程
- * 带上该 flag。
- *
- * 反过来"从 bypassPermissions 切到更严格的模式"**不要**重启：此时进程已带 flag，运行时
- * 降级即可。更关键的是——重启会把进程内的 prePlanMode 记忆冲掉：若 bypass→plan 走重启，
- * 新 CLI 直接以 plan 启动、prePlanMode 为空，ExitPlanMode 只能恢复成 default 而非进入前的
- * bypassPermissions。保持进程不变、走 setPermissionMode 做进程内 transition，CLI 才会像 TUI
- * 一样栈存 prePlanMode='bypassPermissions'，退出 plan 时正确恢复 bypass。
+ * Sessions launched by this desktop build can switch into bypass in-process.
+ * A session that was already running before an app update may lack that launch
+ * capability, so retain the old restart path only for that exact CLI error.
  */
-export function shouldRestartForPermissionMode(
-  currentMode: string,
-  mode: string,
+export function shouldFallbackToPermissionRestart(
+  mode: PermissionMode,
+  error: unknown,
 ): boolean {
-  if (currentMode === mode) return false
-  return mode === 'bypassPermissions'
+  if (mode !== 'bypassPermissions') return false
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes(BYPASS_CAPABILITY_UNAVAILABLE)
 }
 
 async function applyPermissionModeToActiveSession(
@@ -797,15 +795,6 @@ async function applyPermissionModeToActiveSession(
     sendToSession(sessionId, { type: 'permission_mode_changed', mode })
     return
   }
-  const needsRestart = shouldRestartForPermissionMode(currentMode, mode)
-
-  if (needsRestart) {
-    void enqueueRuntimeTransition(sessionId, () =>
-      restartSessionWithPermissionMode(ws, sessionId, mode),
-    )
-    return
-  }
-
   try {
     const ok = await conversationService.setPermissionMode(sessionId, mode)
     if (!ok) {
@@ -814,6 +803,10 @@ async function applyPermissionModeToActiveSession(
     }
     await commitConfirmedPermissionMode(sessionId, mode)
   } catch (err) {
+    if (shouldFallbackToPermissionRestart(mode, err)) {
+      await restartSessionWithPermissionMode(ws, sessionId, mode)
+      return
+    }
     const errMsg = err instanceof Error ? err.message : String(err)
     console.warn(`[WS] Failed to set permission mode for ${sessionId}: ${errMsg}`)
     sendMessage(ws, {

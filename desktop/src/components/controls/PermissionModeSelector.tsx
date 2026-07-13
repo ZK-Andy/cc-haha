@@ -190,7 +190,7 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
               interactionTabIdRef.current = null
               return
             }
-            if (item.value === 'auto' && !autoModeOptInAccepted) {
+            if (item.value === 'auto' && item.value !== currentMode) {
               setOpen(false)
               setAutoDialog(true)
               return
@@ -384,7 +384,9 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
 
           setAutoConsentPending(true)
           try {
-            await acceptAutoModeOptIn()
+            if (!autoModeOptInAccepted) {
+              await acceptAutoModeOptIn()
+            }
             const confirmedTabId = useTabStore.getState().activeTabId
             if (
               confirmedTabId !== interactionTabIdRef.current ||

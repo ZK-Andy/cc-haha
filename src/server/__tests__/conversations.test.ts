@@ -429,8 +429,19 @@ describe('ConversationService', () => {
   it('should not inject a desktop-specific ask override in default permission mode', () => {
     const svc = new ConversationService()
     expect((svc as any).getPermissionArgs('default', false)).toEqual([
+      '--allow-dangerously-skip-permissions',
       '--permission-mode',
       'default',
+    ])
+  })
+
+  it('should keep an initially requested bypass session explicitly dangerous', () => {
+    const svc = new ConversationService()
+    expect((svc as any).getPermissionArgs('bypassPermissions', false)).toEqual([
+      '--dangerously-skip-permissions',
+    ])
+    expect((svc as any).getPermissionArgs('default', true)).toEqual([
+      '--dangerously-skip-permissions',
     ])
   })
 
@@ -1394,7 +1405,7 @@ describe('WebSocket Chat Integration', () => {
   }
 
   async function withMockPermissionModeBehavior<T>(
-    behavior: 'confirm' | 'reject' | 'acknowledge' | 'status-before-reject',
+    behavior: 'confirm' | 'reject' | 'acknowledge' | 'status-before-reject' | 'unavailable',
     callback: () => Promise<T>,
   ): Promise<T> {
     const previousBehavior = process.env.MOCK_SDK_PERMISSION_MODE_BEHAVIOR
@@ -3668,7 +3679,7 @@ describe('WebSocket Chat Integration', () => {
     })
   }, 20_000)
 
-  it('should defer bypass permission restarts until the active turn completes', async () => {
+  it('should defer bypass permission changes until the active turn completes without restarting', async () => {
     await withMockStreamDelay(350, async () => {
       await fetch(`${baseUrl}/api/permissions/mode`, {
         method: 'PUT',
@@ -3703,7 +3714,7 @@ describe('WebSocket Chat Integration', () => {
       const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
       let switchTriggered = false
       let turnComplete = false
-      let modeConfirmedBeforeTurnComplete = false
+      let modeConfirmed = false
       let deferredInspectionChecked = false
       try {
         await new Promise<void>((resolve, reject) => {
@@ -3757,33 +3768,23 @@ describe('WebSocket Chat Integration', () => {
               return
             }
 
-            if (msg.type === 'permission_mode_changed' && !turnComplete) {
-              modeConfirmedBeforeTurnComplete = true
-            }
-
-            if (
-              msg.type === 'status' &&
-              msg.state === 'idle' &&
-              switchTriggered &&
-              !turnComplete &&
-              startCalls.length > 1
-            ) {
-              clearTimeout(timeout)
-              ws.close()
-              reject(new Error('Permission restart ran before the active turn completed'))
+            if (msg.type === 'permission_mode_changed' && msg.mode === 'bypassPermissions') {
+              modeConfirmed = true
+              if (turnComplete) {
+                clearTimeout(timeout)
+                resolve()
+              }
               return
             }
 
             if (msg.type === 'message_complete' && switchTriggered && !turnComplete) {
               turnComplete = true
               expect(startCalls).toHaveLength(1)
+              if (modeConfirmed) {
+                clearTimeout(timeout)
+                resolve()
+              }
               return
-            }
-
-            if (msg.type === 'status' && msg.state === 'idle' && turnComplete && startCalls.length > 1) {
-              clearTimeout(timeout)
-              ws.close()
-              resolve()
             }
           }
 
@@ -3795,21 +3796,16 @@ describe('WebSocket Chat Integration', () => {
 
         expect(switchTriggered).toBe(true)
         expect(turnComplete).toBe(true)
+        expect(modeConfirmed).toBe(true)
         expect(deferredInspectionChecked).toBe(true)
-        expect(modeConfirmedBeforeTurnComplete).toBe(false)
-        expect(startCalls).toHaveLength(2)
+        expect(startCalls).toHaveLength(1)
         expect(startCalls[0]).toMatchObject({
           sessionId,
           options: {
             permissionMode: 'default',
           },
         })
-        expect(startCalls[1]).toMatchObject({
-          sessionId,
-          options: {
-            permissionMode: 'bypassPermissions',
-          },
-        })
+        expect(conversationService.getSessionPermissionMode(sessionId)).toBe('bypassPermissions')
       } finally {
         ws.close()
         conversationService.startSession = originalStartSession
@@ -3823,7 +3819,7 @@ describe('WebSocket Chat Integration', () => {
     })
   }, 20_000)
 
-  it('should keep the session idle in the UI while restarting for a bypass permission switch', async () => {
+  it('should enter bypass permissions without restarting the CLI', async () => {
     await fetch(`${baseUrl}/api/permissions/mode`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -3892,29 +3888,21 @@ describe('WebSocket Chat Integration', () => {
       }, `prewarmed slash commands for idle permission switch ${sessionId}`)
 
       const switchStartIndex = messages.length
+      const switchStartedAt = performance.now()
       ws.send(JSON.stringify({
         type: 'set_permission_mode',
         mode: 'bypassPermissions',
       }))
 
       await waitUntil(
-        async () => messages.slice(switchStartIndex).some((msg) => msg.type === 'status' && msg.state === 'idle'),
-        `idle permission switch completion for ${sessionId}`,
+        () => messages.slice(switchStartIndex).some((msg) =>
+          msg.type === 'permission_mode_changed' && msg.mode === 'bypassPermissions'
+        ),
+        `in-process bypass permission switch completion for ${sessionId}`,
       )
 
-      expect(startCalls).toHaveLength(2)
-      expect(startCalls[1]).toMatchObject({
-        sessionId,
-        options: {
-          permissionMode: 'bypassPermissions',
-        },
-      })
-      expect(
-        messages
-          .slice(switchStartIndex)
-          .filter((msg) => msg.type === 'status')
-          .map((msg) => msg.state),
-      ).toEqual(['idle'])
+      expect(performance.now() - switchStartedAt).toBeLessThan(1_000)
+      expect(startCalls).toHaveLength(1)
       expect(
         messages
           .slice(switchStartIndex)
@@ -3931,6 +3919,71 @@ describe('WebSocket Chat Integration', () => {
         body: JSON.stringify({ mode: 'default' }),
       })
     }
+  }, 20_000)
+
+  it('should restart an already-running legacy session only when bypass capability is unavailable', async () => {
+    await withMockPermissionModeBehavior('unavailable', async () => {
+      const createRes = await fetch(`${baseUrl}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workDir: process.cwd(), permissionMode: 'default' }),
+      })
+      expect(createRes.status).toBe(201)
+      const { sessionId } = await createRes.json() as { sessionId: string }
+
+      const originalStartSession = conversationService.startSession.bind(conversationService)
+      const startModes: Array<string | undefined> = []
+      conversationService.startSession = (async function patchedStartSession(
+        sid: string,
+        workDir: string,
+        sdkUrl: string,
+        options?: { permissionMode?: string; model?: string; effort?: string; thinking?: 'enabled' | 'adaptive' | 'disabled'; providerId?: string | null },
+      ) {
+        startModes.push(options?.permissionMode)
+        return originalStartSession(sid, workDir, sdkUrl, options)
+      }) as typeof conversationService.startSession
+
+      const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+      const messages: any[] = []
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error(`Timed out prewarming ${sessionId}`)), 5_000)
+          ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data as string)
+            messages.push(msg)
+            if (msg.type === 'connected') {
+              clearTimeout(timeout)
+              ws.send(JSON.stringify({ type: 'prewarm_session' }))
+              resolve()
+            }
+          }
+          ws.onerror = () => {
+            clearTimeout(timeout)
+            reject(new Error(`WebSocket error prewarming ${sessionId}`))
+          }
+        })
+        await waitUntil(
+          () => Boolean((conversationService as any).sessions.get(sessionId)?.sdkSocket),
+          `SDK control channel for legacy bypass fallback ${sessionId}`,
+        )
+
+        ws.send(JSON.stringify({ type: 'set_permission_mode', mode: 'bypassPermissions' }))
+        await waitUntil(
+          () => messages.some((msg) =>
+            msg.type === 'permission_mode_changed' && msg.mode === 'bypassPermissions'
+          ),
+          `legacy bypass restart confirmation ${sessionId}`,
+        )
+
+        expect(startModes).toEqual(['default', 'bypassPermissions'])
+        expect(messages.some((msg) => msg.type === 'error')).toBe(false)
+        expect(conversationService.getSessionPermissionMode(sessionId)).toBe('bypassPermissions')
+      } finally {
+        ws.close()
+        conversationService.startSession = originalStartSession
+        conversationService.stopSession(sessionId)
+      }
+    })
   }, 20_000)
 
   it('should persist permission changes made before the CLI starts', async () => {
@@ -4312,62 +4365,61 @@ describe('WebSocket Chat Integration', () => {
     }
   }, 20_000)
 
-  it('should preserve safe permission metadata when a bypass restart fails', async () => {
-    const createRes = await fetch(`${baseUrl}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workDir: process.cwd(), permissionMode: 'default' }),
-    })
-    expect(createRes.status).toBe(201)
-    const { sessionId } = await createRes.json() as { sessionId: string }
-    const originalStartSession = conversationService.startSession.bind(conversationService)
-    let startCount = 0
-    conversationService.startSession = (async (...args: Parameters<typeof conversationService.startSession>) => {
-      startCount += 1
-      if (startCount === 2) throw new Error('mock bypass restart failure')
-      return originalStartSession(...args)
-    }) as typeof conversationService.startSession
-    const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
-    const messages: any[] = []
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`Timed out prewarming ${sessionId}`)), 5_000)
-        ws.onmessage = (event) => {
-          const msg = JSON.parse(event.data as string)
-          messages.push(msg)
-          if (msg.type === 'connected') {
-            clearTimeout(timeout)
-            ws.send(JSON.stringify({ type: 'prewarm_session' }))
-            resolve()
-          }
-        }
-        ws.onerror = () => {
-          clearTimeout(timeout)
-          reject(new Error(`WebSocket error prewarming ${sessionId}`))
-        }
+  it('should preserve safe permission metadata when a bypass change is rejected', async () => {
+    await withMockPermissionModeBehavior('reject', async () => {
+      const createRes = await fetch(`${baseUrl}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workDir: process.cwd(), permissionMode: 'default' }),
       })
-      await waitUntil(() => startCount === 1, `initial prewarm start for ${sessionId}`)
+      expect(createRes.status).toBe(201)
+      const { sessionId } = await createRes.json() as { sessionId: string }
+      const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+      const messages: any[] = []
 
-      ws.send(JSON.stringify({ type: 'set_permission_mode', mode: 'bypassPermissions' }))
-      await waitUntil(
-        () => messages.some((msg) => msg.type === 'error' && msg.code === 'CLI_RESTART_FAILED'),
-        `failed bypass restart for ${sessionId}`,
-      )
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error(`Timed out prewarming ${sessionId}`)), 5_000)
+          ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data as string)
+            messages.push(msg)
+            if (msg.type === 'connected') {
+              clearTimeout(timeout)
+              ws.send(JSON.stringify({ type: 'prewarm_session' }))
+              resolve()
+            }
+          }
+          ws.onerror = () => {
+            clearTimeout(timeout)
+            reject(new Error(`WebSocket error prewarming ${sessionId}`))
+          }
+        })
+        await waitUntil(
+          () => Boolean((conversationService as any).sessions.get(sessionId)?.sdkSocket),
+          `SDK control channel for rejected bypass change ${sessionId}`,
+        )
 
-      const inspectionRes = await fetch(
-        `${baseUrl}/api/sessions/${sessionId}/inspection?includeContext=0`,
-      )
-      const inspection = await inspectionRes.json() as { status?: { permissionMode?: string } }
-      expect(inspection.status?.permissionMode).toBe('default')
-      expect(messages.some((msg) =>
-        msg.type === 'permission_mode_changed' && msg.mode === 'bypassPermissions'
-      )).toBe(false)
-    } finally {
-      ws.close()
-      conversationService.startSession = originalStartSession
-      conversationService.stopSession(sessionId)
-    }
+        ws.send(JSON.stringify({ type: 'set_permission_mode', mode: 'bypassPermissions' }))
+        await waitUntil(
+          () => messages.some((msg) =>
+            msg.type === 'error' && msg.code === 'PERMISSION_MODE_CHANGE_FAILED'
+          ),
+          `rejected bypass change for ${sessionId}`,
+        )
+
+        const inspectionRes = await fetch(
+          `${baseUrl}/api/sessions/${sessionId}/inspection?includeContext=0`,
+        )
+        const inspection = await inspectionRes.json() as { status?: { permissionMode?: string } }
+        expect(inspection.status?.permissionMode).toBe('default')
+        expect(messages.some((msg) =>
+          msg.type === 'permission_mode_changed' && msg.mode === 'bypassPermissions'
+        )).toBe(false)
+      } finally {
+        ws.close()
+        conversationService.stopSession(sessionId)
+      }
+    })
   }, 20_000)
 
   it('should persist CLI-originated permission-mode broadcasts', async () => {
@@ -5205,7 +5257,7 @@ describe('WebSocket Chat Integration', () => {
     }
   }, 20_000)
 
-  it('should wait for an in-flight permission restart before sending the next user turn', async () => {
+  it('should wait for an in-flight permission change before sending the next user turn', async () => {
     await fetch(`${baseUrl}/api/permissions/mode`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -5304,17 +5356,11 @@ describe('WebSocket Chat Integration', () => {
         }
       })
 
-      expect(startCalls).toHaveLength(2)
+      expect(startCalls).toHaveLength(1)
       expect(startCalls[0]).toMatchObject({
         sessionId,
         options: {
           permissionMode: 'default',
-        },
-      })
-      expect(startCalls[1]).toMatchObject({
-        sessionId,
-        options: {
-          permissionMode: 'bypassPermissions',
         },
       })
       expect(sendCalls).toMatchObject([
@@ -5325,7 +5371,7 @@ describe('WebSocket Chat Integration', () => {
         },
         {
           content: 'second turn immediately after permission switch',
-          startCallCount: 2,
+          startCallCount: 1,
           permissionMode: 'bypassPermissions',
         },
       ])
