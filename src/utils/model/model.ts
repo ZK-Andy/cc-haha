@@ -106,6 +106,16 @@ export function getBestModel(): ModelName {
   return getDefaultOpusModel()
 }
 
+export function getDefaultFableModel(): ModelName {
+  if (isOpenAIAuthActive()) {
+    return resolveOpenAICodexModel('fable')
+  }
+  if (process.env.ANTHROPIC_DEFAULT_FABLE_MODEL) {
+    return process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+  }
+  return getModelStrings().fable5
+}
+
 // @[MODEL LAUNCH]: Update the default Opus model (3P providers may lag so keep defaults unchanged).
 export function getDefaultOpusModel(): ModelName {
   if (isOpenAIAuthActive()) {
@@ -240,6 +250,9 @@ export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   name = name.toLowerCase()
   // Special cases for Claude 4+ models to differentiate versions
   // Order matters: check more specific versions first (4-5 before 4)
+  if (name.includes('claude-fable-5')) {
+    return 'claude-fable-5'
+  }
   if (name.includes('claude-opus-4-7')) {
     return 'claude-opus-4-7'
   }
@@ -380,6 +393,10 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     return openAIModelName
   }
   switch (model) {
+    case getModelStrings().fable5:
+      return 'Fable 5'
+    case getModelStrings().fable5 + '[1m]':
+      return 'Fable 5 (1M context)'
     case getModelStrings().opus46:
       return 'Opus 4.7'
     case getModelStrings().opus46 + '[1m]':
@@ -489,6 +506,8 @@ export function parseUserSpecifiedModel(
     switch (modelString) {
       case 'opusplan':
         return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '') // Sonnet is default, Opus in plan mode
+      case 'fable':
+        return getDefaultFableModel() + (has1mTag ? '[1m]' : '')
       case 'sonnet':
         return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '')
       case 'haiku':
@@ -547,7 +566,7 @@ export function parseUserSpecifiedModel(
  * context window from 1M to 200K, which trips autocompact at 23% apparent usage
  * and surfaces "Context limit reached" even though nothing overflowed.
  *
- * We only carry [1m] when the target actually supports it (sonnet/opus). A skill
+ * We only carry [1m] when the target actually supports it (fable/sonnet/opus). A skill
  * with `model: haiku` on a 1M session still downgrades — haiku has no 1M variant,
  * so the autocompact that follows is correct. Skills that already specify [1m]
  * are left untouched.
@@ -612,6 +631,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   const has1m = modelId.toLowerCase().includes('[1m]')
   const canonical = getCanonicalName(modelId)
 
+  if (canonical.includes('claude-fable-5')) {
+    return has1m ? 'Fable 5 (with 1M context)' : 'Fable 5'
+  }
   if (canonical.includes('claude-opus-4-7')) {
     return has1m ? 'Opus 4.7 (with 1M context)' : 'Opus 4.7'
   }

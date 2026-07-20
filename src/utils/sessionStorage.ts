@@ -80,6 +80,7 @@ import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
 import { extractTag, isCompactBoundaryMessage } from './messages.js'
+import type { ModelAlias } from './model/aliases.js'
 import { sanitizePath } from './path.js'
 import {
   extractJsonStringField,
@@ -263,6 +264,8 @@ function getAgentMetadataPath(agentId: AgentId): string {
 
 export type AgentMetadata = {
   agentType: string
+  /** Per-invocation Agent tool model override. Retained across follow-ups. */
+  model?: ModelAlias
   /** Worktree path if the agent was spawned with isolation: "worktree" */
   worktreePath?: string
   /** Original task description from the AgentTool input. Persisted so a

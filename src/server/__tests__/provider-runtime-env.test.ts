@@ -7,6 +7,8 @@ import {
   mergeActiveProviderManagedEnv,
   readActiveProviderManagedEnv,
 } from '../services/providerRuntimeEnv.js'
+import { resolveAppliedEffort } from '../../utils/effort.js'
+import { get3PModelCapabilityOverride } from '../../utils/model/modelSupportOverrides.js'
 
 let tmpDir: string
 let originalConfigDir: string | undefined
@@ -97,9 +99,43 @@ describe('providerRuntimeEnv', () => {
       ENABLE_TOOL_SEARCH: 'true',
       ANTHROPIC_MODEL: 'active-main',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'active-main',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'active-sonnet',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'active-main',
+      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     })
+
+    const runtimeKeys = [
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES',
+      'CLAUDE_CODE_EFFORT_LEVEL',
+    ] as const
+    const originalRuntimeEnv = Object.fromEntries(
+      runtimeKeys.map(key => [key, process.env[key]]),
+    )
+    try {
+      process.env.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL
+      process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL =
+        env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+      process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES =
+        env.ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES
+      delete process.env.CLAUDE_CODE_EFFORT_LEVEL
+      clearCapabilityCache()
+
+      expect(resolveAppliedEffort('active-main', 'xhigh')).toBe('xhigh')
+    } finally {
+      for (const key of runtimeKeys) {
+        const value = originalRuntimeEnv[key]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      clearCapabilityCache()
+    }
   })
 
   test('active provider env overrides stale proxy settings while preserving unrelated env', async () => {
@@ -365,3 +401,9 @@ describe('providerRuntimeEnv', () => {
     })
   })
 })
+
+function clearCapabilityCache() {
+  ;(get3PModelCapabilityOverride as typeof get3PModelCapabilityOverride & {
+    cache?: { clear?: () => void }
+  }).cache?.clear?.()
+}

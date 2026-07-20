@@ -168,7 +168,11 @@ import { CHROME_TOOL_SEARCH_INSTRUCTIONS } from "src/utils/claudeInChrome/prompt
 import { getMaxThinkingTokensForModel } from "src/utils/context.js";
 import { logForDebugging } from "src/utils/debug.js";
 import { logForDiagnosticsNoPII } from "src/utils/diagLogs.js";
-import { type EffortValue, modelSupportsEffort } from "src/utils/effort.js";
+import {
+  type EffortLevel,
+  type EffortValue,
+  modelSupportsEffort,
+} from "src/utils/effort.js";
 import {
   isFastModeAvailable,
   isFastModeCooldown,
@@ -179,6 +183,7 @@ import { returnValue } from "src/utils/generators.js";
 import { headlessProfilerCheckpoint } from "src/utils/headlessProfiler.js";
 import { isMcpInstructionsDeltaEnabled } from "src/utils/mcpInstructionsDelta.js";
 import { calculateUSDCost } from "src/utils/modelCost.js";
+import { isOpenAIResponsesModel } from "src/services/openaiAuth/models.js";
 import { endQueryProfile, queryCheckpoint } from "src/utils/queryProfiler.js";
 import {
   modelSupportsAdaptiveThinking,
@@ -459,20 +464,34 @@ export function configureEffortParams(
   betas: string[],
   model: string,
 ): void {
+  // The locked SDK predates the public xhigh wire value. Keep its request
+  // shape everywhere else, but widen this one field to match the API protocol.
+  const effortOutputConfig = outputConfig as Omit<
+    BetaOutputConfig,
+    'effort'
+  > & { effort?: EffortLevel | null }
+
   if (
     !modelSupportsEffort(model) ||
-    'effort' in outputConfig ||
+    'effort' in effortOutputConfig ||
     shouldSuppressEffortOutputConfig()
   ) {
     return
   }
 
   if (effortValue === undefined) {
-    outputConfig.effort = 'high'
+    // Native Claude defaults to high effort when this field is omitted, and
+    // historically sends it explicitly for stable request behavior. OpenAI
+    // Responses is different: its Desktop session effort lives in
+    // CC_HAHA_OPENAI_REASONING_EFFORT and its catalog has per-model defaults.
+    // Writing a synthetic `high` here would make the transport mistake that
+    // fallback for an explicit request value and override both layers.
+    if (isOpenAIResponsesModel(model)) return
+    effortOutputConfig.effort = 'high'
     betas.push(EFFORT_BETA_HEADER)
   } else if (typeof effortValue === 'string') {
     // Send string effort level as is
-    outputConfig.effort = effortValue
+    effortOutputConfig.effort = effortValue
     betas.push(EFFORT_BETA_HEADER)
   } else if (process.env.USER_TYPE === 'ant') {
     // Numeric effort override - ant-only (uses anthropic_internal)
@@ -732,6 +751,7 @@ export type Options = {
   skipCacheWrite?: boolean;
   temperatureOverride?: number;
   effortValue?: EffortValue;
+  effortValueOverridesEnv?: boolean;
   mcpTools: Tools;
   hasPendingMcpServers?: boolean;
   queryTracking?: QueryChainTracking;
@@ -1553,7 +1573,9 @@ async function* queryModel(
     }
   }
 
-  const effort = resolveAppliedEffort(options.model, options.effortValue);
+  const effort = resolveAppliedEffort(options.model, options.effortValue, {
+    effortValueOverridesEnv: options.effortValueOverridesEnv,
+  });
 
   if (feature("PROMPT_CACHE_BREAK_DETECTION")) {
     // Exclude defer_loading tools from the hash -- the API strips them from the
@@ -1669,17 +1691,18 @@ async function* queryModel(
       ...((extraBodyParams.output_config as BetaOutputConfig) ?? {}),
     };
 
-    if (sendsExplicitDisabledThinking) {
-      delete outputConfig.effort
-    } else {
-      configureEffortParams(
-        effort,
-        outputConfig,
-        extraBodyParams,
-        betasParams,
-        options.model,
-      )
-    }
+    // Thinking mode and effort are independent request controls. In
+    // particular, OpenAI Responses providers use reasoning.effort even when
+    // the Anthropic-compatible envelope explicitly disables `thinking`.
+    // Provider capability checks inside configureEffortParams remain the
+    // authority for whether effort may be sent.
+    configureEffortParams(
+      effort,
+      outputConfig,
+      extraBodyParams,
+      betasParams,
+      options.model,
+    )
 
     configureTaskBudgetParams(
       options.taskBudget,

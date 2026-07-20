@@ -50,9 +50,10 @@ export function AppShell() {
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const setActiveTab = useTabStore((s) => s.setActiveTab)
-  const activeSession = useSessionStore((s) =>
-    activeTabId ? s.sessions.find((session) => session.id === activeTabId) ?? null : null,
-  )
+  const sessions = useSessionStore((s) => s.sessions)
+  const activeSession = activeTabId
+    ? sessions.find((session) => session.id === activeTabId) ?? null
+    : null
   const wasMobileShellRef = useRef(false)
   const effectiveSidebarOpen = isMobileShell ? mobileSidebarOpen : sidebarOpen
   const activeTab = tabs.find((tab) => tab.sessionId === activeTabId)
@@ -70,6 +71,27 @@ export function AppShell() {
     isMobileShell && !effectiveSidebarOpen
       ? { 'aria-hidden': true, inert: '' }
       : {}
+
+  useEffect(() => {
+    const sessionStore = useSessionStore.getState()
+    if (activeSession) {
+      if (sessionStore.activeSessionId !== activeSession.id) {
+        sessionStore.setActiveSession(activeSession.id)
+      }
+      return
+    }
+    if (sessionStore.activeSessionId || activeTab?.type !== 'settings') return
+
+    const openSessionIds = new Set(
+      tabs.filter((tab) => tab.type === 'session').map((tab) => tab.sessionId),
+    )
+    // SessionStore keeps sessions most-recent-first; intersecting with restored
+    // tabs excludes Settings and synthetic teammate tabs.
+    const fallbackSession = sessions.find((session) => openSessionIds.has(session.id))
+    if (fallbackSession) {
+      sessionStore.setActiveSession(fallbackSession.id)
+    }
+  }, [activeSession, activeTab?.type, sessions, tabs])
 
   useEffect(() => {
     let cancelled = false

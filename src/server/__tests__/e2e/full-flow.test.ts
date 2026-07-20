@@ -301,24 +301,26 @@ describe('E2E: Full Flow', () => {
 
   it('should create an agent', async () => {
     const { status } = await api('POST', '/api/agents', {
+      scope: 'user',
       name: 'test-agent',
       description: 'A test agent',
       model: 'claude-sonnet-4-6',
+      systemPrompt: 'Complete the requested test task.',
     })
     expect(status).toBe(201)
   })
 
-  it('should expose shared active/all agent payload independent of CRUD storage', async () => {
+  it('should expose the created Markdown agent through the shared loader', async () => {
     const { data } = await api('GET', '/api/agents')
     expect(Array.isArray(data.activeAgents)).toBe(true)
     expect(Array.isArray(data.allAgents)).toBe(true)
     expect(data.activeAgents.length).toBeGreaterThan(0)
     expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
-    expect(data.activeAgents.some((agent: any) => agent.agentType === 'test-agent')).toBe(false)
+    expect(data.activeAgents.some((agent: any) => agent.agentType === 'test-agent')).toBe(true)
   })
 
   it('should delete an agent', async () => {
-    const { status } = await api('DELETE', '/api/agents/test-agent')
+    const { status } = await api('DELETE', '/api/agents/test-agent?scope=user')
     expect([200, 204]).toContain(status)
   })
 

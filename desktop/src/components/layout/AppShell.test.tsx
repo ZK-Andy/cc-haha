@@ -193,6 +193,92 @@ describe('AppShell boot flow', () => {
     expect(screen.getByText('updates loaded')).toBeInTheDocument()
   })
 
+  it('keeps the last real session as Settings project context', async () => {
+    useSessionStore.setState({
+      sessions: [{
+        id: 'session-1',
+        title: 'Project session',
+        createdAt: '',
+        modifiedAt: '',
+        messageCount: 0,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: null,
+    })
+    mocks.tabState.activeTabId = 'session-1'
+    mocks.tabState.tabs = [
+      { sessionId: 'session-1', title: 'Project session', type: 'session', status: 'idle' },
+      { sessionId: '__settings__', title: 'Settings', type: 'settings', status: 'idle' },
+    ]
+
+    const { rerender } = render(<AppShell />)
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().activeSessionId).toBe('session-1')
+    })
+
+    mocks.tabState.activeTabId = '__settings__'
+    rerender(<AppShell />)
+    expect(useSessionStore.getState().activeSessionId).toBe('session-1')
+
+    mocks.tabState.activeTabId = 'team-member:synthetic'
+    mocks.tabState.tabs = [
+      ...mocks.tabState.tabs,
+      { sessionId: 'team-member:synthetic', title: 'Teammate', type: 'session', status: 'idle' },
+    ]
+    rerender(<AppShell />)
+    expect(useSessionStore.getState().activeSessionId).toBe('session-1')
+  })
+
+  it('restores the most recent open real session as Settings project context', async () => {
+    const restoredSessions = [
+      {
+        id: 'session-recent',
+        title: 'Recent project session',
+        createdAt: '2026-07-21T02:00:00.000Z',
+        modifiedAt: '2026-07-21T03:00:00.000Z',
+        messageCount: 2,
+        projectPath: '/workspace/recent',
+        workDir: '/workspace/recent',
+        workDirExists: true,
+      },
+      {
+        id: 'session-older',
+        title: 'Older project session',
+        createdAt: '2026-07-20T02:00:00.000Z',
+        modifiedAt: '2026-07-20T03:00:00.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/older',
+        workDir: '/workspace/older',
+        workDirExists: true,
+      },
+    ]
+    mocks.tabState.activeTabId = '__settings__'
+    mocks.tabState.tabs = [
+      { sessionId: 'session-older', title: 'Older project session', type: 'session', status: 'idle' },
+      { sessionId: '__settings__', title: 'Settings', type: 'settings', status: 'idle' },
+      { sessionId: 'team-member:synthetic', title: 'Teammate', type: 'session', status: 'idle' },
+      { sessionId: 'session-recent', title: 'Recent project session', type: 'session', status: 'idle' },
+    ]
+
+    const { rerender } = render(<AppShell />)
+
+    expect(useSessionStore.getState().activeSessionId).toBeNull()
+    act(() => {
+      useSessionStore.setState({ sessions: restoredSessions })
+    })
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().activeSessionId).toBe('session-recent')
+    })
+
+    mocks.tabState.activeTabId = 'team-member:synthetic'
+    rerender(<AppShell />)
+    expect(useSessionStore.getState().activeSessionId).toBe('session-recent')
+  })
+
   it('shows startup diagnostics instead of a blank shell when bootstrap fails', async () => {
     mocks.fetchAll.mockRejectedValueOnce(new Error('settings file could not be read'))
 

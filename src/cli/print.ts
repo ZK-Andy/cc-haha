@@ -277,9 +277,8 @@ import {
 } from 'src/utils/model/model.js'
 import { getModelOptions } from 'src/utils/model/modelOptions.js'
 import {
+  getSupportedEffortLevelsForModel,
   modelSupportsEffort,
-  modelSupportsMaxEffort,
-  EFFORT_LEVELS,
   resolveAppliedEffort,
 } from 'src/utils/effort.js'
 import { modelSupportsAdaptiveThinking } from 'src/utils/thinking.js'
@@ -1214,9 +1213,8 @@ function runHeadlessStreaming(
       description: option.description,
       ...(hasEffort && {
         supportsEffort: true,
-        supportedEffortLevels: modelSupportsMaxEffort(resolvedModel)
-          ? [...EFFORT_LEVELS]
-          : EFFORT_LEVELS.filter(l => l !== 'max'),
+        supportedEffortLevels:
+          getSupportedEffortLevelsForModel(resolvedModel),
       }),
       ...(hasAdaptiveThinking && { supportsAdaptiveThinking: true }),
       ...(hasFastMode && { supportsFastMode: true }),

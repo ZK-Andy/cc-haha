@@ -51,7 +51,8 @@ export const MANAGED_PROVIDER_ENV_KEYS = [
   GROK_OAUTH_FILE_ENV_KEY,
 ] as const
 
-const CUSTOM_PROVIDER_MODEL_CAPABILITIES = 'thinking,effort,adaptive_thinking,max_effort'
+const CUSTOM_PROVIDER_MODEL_CAPABILITIES =
+  'thinking,effort,adaptive_thinking,xhigh_effort,max_effort'
 const XIAOMI_MIMO_MODEL_CAPABILITIES = 'thinking'
 const KIMI_K3_MODEL_CAPABILITIES = 'thinking,required_thinking,effort,max_effort'
 const KIMI_CODING_FALLBACK_MODEL_CAPABILITIES = 'thinking,required_thinking'
