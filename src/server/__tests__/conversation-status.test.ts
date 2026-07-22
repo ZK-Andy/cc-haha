@@ -112,7 +112,7 @@ describe('read-only session chat activity status', () => {
     expect(await getStatus(sessionId)).toBe('failed')
   })
 
-  it('marks a successful CLI result for review and clears it when a new turn starts', async () => {
+  it('returns idle after a successful CLI result even while the session tab remains open', async () => {
     const sessionId = `status-review-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId)
     handleWebSocket.open(ws)
@@ -122,13 +122,13 @@ describe('read-only session chat activity status', () => {
       subtype: 'success',
       usage: {},
     })
-    expect(await getStatus(sessionId)).toBe('review')
+    expect(await getStatus(sessionId)).toBe('idle')
 
     __registerPendingUserTurnForTests(sessionId)
     expect(await getStatus(sessionId)).toBe('running')
   })
 
-  it('clears successful review state when the last full client closes', async () => {
+  it('keeps a successful completed turn idle when the last full client closes', async () => {
     const sessionId = `status-review-close-${crypto.randomUUID()}`
     const pet = makeClientSocket(sessionId, 'pet')
     const ws = makeClientSocket(sessionId)
@@ -140,7 +140,7 @@ describe('read-only session chat activity status', () => {
       subtype: 'success',
       usage: {},
     })
-    expect(await getStatus(sessionId)).toBe('review')
+    expect(await getStatus(sessionId)).toBe('idle')
 
     handleWebSocket.close(ws, 1000, 'tab closed')
     expect(await getStatus(sessionId)).toBe('idle')
@@ -206,10 +206,11 @@ describe('read-only session chat activity status', () => {
     __markActiveTurnForTests(sessionId)
     __settleActiveTurnForTests(sessionId, {
       type: 'result',
-      subtype: 'success',
+      subtype: 'error_during_execution',
+      is_error: true,
       usage: {},
     })
-    expect(getSessionChatActivityState(sessionId)).toBe('review')
+    expect(getSessionChatActivityState(sessionId)).toBe('failed')
 
     __resetWebSocketHandlerStateForTests()
     expect(getSessionChatActivityState(sessionId)).toBe('idle')

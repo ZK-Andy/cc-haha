@@ -6,6 +6,7 @@ import {
   Boxes,
   Bolt,
   Braces,
+  Check,
   ChevronDown,
   CircleAlert,
   Folder,
@@ -15,6 +16,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Shield,
   Terminal,
   Trash2,
@@ -22,6 +24,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import type { TranslationKey } from '../../i18n'
 import type {
   AgentDefinition,
   AgentMutationInput,
@@ -65,6 +68,27 @@ const BUILT_IN_MODELS = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 const NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 type ToolAccessMode = 'inherit' | 'none' | 'custom'
+type ToolCategory = 'readSearch' | 'modify' | 'execute' | 'workflow' | 'other'
+
+const TOOL_CATEGORY_ORDER: ToolCategory[] = ['readSearch', 'modify', 'execute', 'workflow', 'other']
+const TOOL_METADATA: Record<string, { category: ToolCategory; description: TranslationKey }> = {
+  Read: { category: 'readSearch', description: 'settings.agents.form.toolDescription.Read' },
+  Glob: { category: 'readSearch', description: 'settings.agents.form.toolDescription.Glob' },
+  Grep: { category: 'readSearch', description: 'settings.agents.form.toolDescription.Grep' },
+  WebFetch: { category: 'readSearch', description: 'settings.agents.form.toolDescription.WebFetch' },
+  WebSearch: { category: 'readSearch', description: 'settings.agents.form.toolDescription.WebSearch' },
+  Edit: { category: 'modify', description: 'settings.agents.form.toolDescription.Edit' },
+  Write: { category: 'modify', description: 'settings.agents.form.toolDescription.Write' },
+  NotebookEdit: { category: 'modify', description: 'settings.agents.form.toolDescription.NotebookEdit' },
+  Bash: { category: 'execute', description: 'settings.agents.form.toolDescription.Bash' },
+  PowerShell: { category: 'execute', description: 'settings.agents.form.toolDescription.PowerShell' },
+  TodoWrite: { category: 'workflow', description: 'settings.agents.form.toolDescription.TodoWrite' },
+  Skill: { category: 'workflow', description: 'settings.agents.form.toolDescription.Skill' },
+  ToolSearch: { category: 'workflow', description: 'settings.agents.form.toolDescription.ToolSearch' },
+  EnterWorktree: { category: 'workflow', description: 'settings.agents.form.toolDescription.EnterWorktree' },
+  ExitWorktree: { category: 'workflow', description: 'settings.agents.form.toolDescription.ExitWorktree' },
+  StructuredOutput: { category: 'workflow', description: 'settings.agents.form.toolDescription.StructuredOutput' },
+}
 
 function getAgentProjectPath(agent?: AgentDefinition): string | undefined {
   if (agent?.source !== 'projectSettings' || !agent.baseDir) return undefined
@@ -135,9 +159,6 @@ export function AgentManager() {
               <p className="text-sm font-medium text-[var(--color-text-primary)]">
                 {t('settings.agents.refreshWarning')}
               </p>
-              <p className="mt-0.5 break-words text-xs text-[var(--color-text-secondary)]">
-                {mutationWarning}
-              </p>
             </div>
           </div>
           <Button
@@ -182,7 +203,7 @@ export function AgentManager() {
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-5 py-10 text-center">
-              <p className="mb-3 text-sm text-[var(--color-error)]">{error}</p>
+              <p className="mb-3 text-sm text-[var(--color-error)]">{t('settings.agents.loadError')}</p>
               <Button
                 variant="secondary"
                 size="sm"
@@ -430,6 +451,7 @@ function AgentFormModal({
   const createAgent = useAgentStore((state) => state.createAgent)
   const updateAgent = useAgentStore((state) => state.updateAgent)
   const isMutating = useAgentStore((state) => state.isMutating)
+  const availableTools = useAgentStore((state) => state.availableTools)
   const sessions = useSessionStore((state) => state.sessions)
   const initialScope = agent?.source === 'projectSettings' ? 'project' : 'user'
   const initialModel = agent?.model || 'inherit'
@@ -455,8 +477,18 @@ function AgentFormModal({
       ? 'none'
       : 'custom'
   const [toolAccess, setToolAccess] = useState<ToolAccessMode>(initialToolAccess)
-  const initialToolsText = agent?.tools?.join(', ') || ''
-  const [tools, setTools] = useState(initialToolsText)
+  const initialTools = agent?.tools ?? []
+  const [selectedBuiltInTools, setSelectedBuiltInTools] = useState(
+    initialTools.filter(tool => availableTools.includes(tool)),
+  )
+  const [customTools, setCustomTools] = useState(
+    initialTools.filter(tool => !availableTools.includes(tool)).join(', '),
+  )
+  const [toolsDirty, setToolsDirty] = useState(false)
+  const parsedTools = useMemo(
+    () => [...new Set([...selectedBuiltInTools, ...parseTools(customTools)])],
+    [customTools, selectedBuiltInTools],
+  )
   const [color, setColor] = useState(agent?.color || '')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -464,7 +496,6 @@ function AgentFormModal({
   const handleSubmit = async () => {
     const nextErrors: Record<string, string> = {}
     const trimmedName = name.trim()
-    const parsedTools = parseTools(tools)
     if (!NAME_PATTERN.test(trimmedName)) nextErrors.name = t('settings.agents.form.nameError')
     if (!description.trim()) nextErrors.description = t('settings.agents.form.descriptionRequired')
     if (mode === 'create' && !systemPrompt.trim()) nextErrors.systemPrompt = t('settings.agents.form.systemPromptRequired')
@@ -476,7 +507,7 @@ function AgentFormModal({
 
     const toolSelectionIsUnchanged = mode === 'edit' &&
       toolAccess === initialToolAccess &&
-      (toolAccess !== 'custom' || tools === initialToolsText)
+      (toolAccess !== 'custom' || !toolsDirty)
     const targetCwd = scope === 'project' ? projectPath : cwd
     const input: AgentMutationInput = {
       scope,
@@ -517,8 +548,8 @@ function AgentFormModal({
       }
       if (scope === 'project' && targetCwd) onProjectContextChange(targetCwd)
       onClose()
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : t('settings.agents.form.saveError'))
+    } catch {
+      setSubmitError(t('settings.agents.form.saveError'))
     }
   }
 
@@ -674,13 +705,19 @@ function AgentFormModal({
               : t('settings.agents.form.toolsHint')}
         </p>
         {toolAccess === 'custom' && (
-          <Input
-            label={t('settings.agents.form.toolsCustomLabel')}
-            required
-            value={tools}
+          <ToolPicker
+            availableTools={availableTools}
+            selectedTools={selectedBuiltInTools}
+            customTools={customTools}
             error={fieldErrors.tools}
-            placeholder={t('settings.agents.form.toolsPlaceholder')}
-            onChange={(event) => setTools(event.target.value)}
+            onSelectedToolsChange={(nextTools) => {
+              setSelectedBuiltInTools(nextTools)
+              setToolsDirty(true)
+            }}
+            onCustomToolsChange={(value) => {
+              setCustomTools(value)
+              setToolsDirty(true)
+            }}
           />
         )}
 
@@ -707,6 +744,143 @@ function AgentFormModal({
         )}
       </div>
     </Modal>
+  )
+}
+
+function ToolPicker({
+  availableTools,
+  selectedTools,
+  customTools,
+  error,
+  onSelectedToolsChange,
+  onCustomToolsChange,
+}: {
+  availableTools: string[]
+  selectedTools: string[]
+  customTools: string
+  error?: string
+  onSelectedToolsChange: (tools: string[]) => void
+  onCustomToolsChange: (value: string) => void
+}) {
+  const t = useTranslation()
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const visibleTools = availableTools.filter((tool) => {
+    if (!normalizedQuery) return true
+    const metadata = TOOL_METADATA[tool]
+    const description = t(metadata?.description ?? 'settings.agents.form.toolDescription.generic')
+    const category = t(`settings.agents.form.toolCategory.${metadata?.category ?? 'other'}`)
+    return `${tool} ${description} ${category}`.toLowerCase().includes(normalizedQuery)
+  })
+  const groupedTools = TOOL_CATEGORY_ORDER.map((category) => ({
+    category,
+    tools: visibleTools.filter(tool => (TOOL_METADATA[tool]?.category ?? 'other') === category),
+  })).filter(group => group.tools.length > 0)
+
+  const toggleTool = (tool: string) => {
+    onSelectedToolsChange(
+      selectedTools.includes(tool)
+        ? selectedTools.filter(selectedTool => selectedTool !== tool)
+        : [...selectedTools, tool],
+    )
+  }
+
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {t('settings.agents.form.builtInTools')}
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
+            {t('settings.agents.form.builtInToolsHint')}
+          </p>
+        </div>
+        <span className="rounded-full bg-[var(--color-primary-fixed)] px-2.5 py-1 text-xs font-medium text-[var(--color-brand)]">
+          {t('settings.agents.form.toolsSelectedCount', { count: selectedTools.length })}
+        </span>
+      </div>
+
+      {availableTools.length > 0 ? (
+        <>
+          <label className="relative mb-3 block">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
+            <input
+              type="search"
+              aria-label={t('settings.agents.form.toolsSearch')}
+              value={query}
+              placeholder={t('settings.agents.form.toolsSearchPlaceholder')}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-9 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] pl-9 pr-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[var(--color-brand)]/15"
+            />
+          </label>
+          <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
+            {groupedTools.map(({ category, tools }) => (
+              <section key={category} aria-label={t(`settings.agents.form.toolCategory.${category}`)}>
+                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                  {t(`settings.agents.form.toolCategory.${category}`)}
+                </h4>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {tools.map((tool) => {
+                    const selected = selectedTools.includes(tool)
+                    const description = t(TOOL_METADATA[tool]?.description ?? 'settings.agents.form.toolDescription.generic')
+                    return (
+                      <button
+                        key={tool}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selected}
+                        aria-label={`${tool} — ${description}`}
+                        onClick={() => toggleTool(tool)}
+                        className={`flex min-h-14 items-start gap-2.5 rounded-[var(--radius-md)] border px-3 py-2.5 text-left transition-colors ${
+                          selected
+                            ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-selected)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                        }`}
+                      >
+                        <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          selected
+                            ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-white'
+                            : 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
+                        }`}>
+                          {selected && <Check size={12} strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-mono text-xs font-semibold text-[var(--color-text-primary)]">{tool}</span>
+                          <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-text-tertiary)]">{description}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+            {groupedTools.length === 0 && (
+              <p className="py-5 text-center text-xs text-[var(--color-text-tertiary)]">
+                {t('settings.agents.form.toolsNoResults')}
+              </p>
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
+          {t('settings.agents.form.toolsUnavailable')}
+        </p>
+      )}
+
+      <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+        <Input
+          label={t('settings.agents.form.toolsCustomLabel')}
+          value={customTools}
+          error={error}
+          placeholder={t('settings.agents.form.toolsPlaceholder')}
+          onChange={(event) => onCustomToolsChange(event.target.value)}
+        />
+        <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+          {t('settings.agents.form.toolsCustomHint')}
+        </p>
+      </div>
+    </div>
   )
 }
 
@@ -737,8 +911,8 @@ function AgentDeleteDialog({
     try {
       await deleteAgent(agent.agentType, scope, cwd, agent.target, sessionId)
       onClose()
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : t('settings.agents.deleteError'))
+    } catch {
+      setDeleteError(t('settings.agents.deleteError'))
     }
   }
 

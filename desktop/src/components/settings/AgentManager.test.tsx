@@ -94,7 +94,7 @@ function chooseAgentSelect(label: string, option: string) {
 
 describe('AgentManager', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     apiReloadMock.mockResolvedValue({
       ok: true,
       session: {
@@ -112,6 +112,7 @@ describe('AgentManager', () => {
     useAgentStore.setState({
       activeAgents: [],
       allAgents: [],
+      availableTools: [],
       isLoading: false,
       isMutating: false,
       error: null,
@@ -161,8 +162,8 @@ describe('AgentManager', () => {
       target: '/workspace/b/.claude/agents/code_reviewer.md',
     })
     apiListMock
-      .mockResolvedValueOnce(EMPTY_RESPONSE)
-      .mockResolvedValueOnce({ activeAgents: [created], allAgents: [created] })
+      .mockResolvedValueOnce({ ...EMPTY_RESPONSE, availableTools: ['Read', 'Grep', 'Bash'] })
+      .mockResolvedValueOnce({ activeAgents: [created], allAgents: [created], availableTools: ['Read', 'Grep', 'Bash'] })
       .mockResolvedValueOnce({ activeAgents: [created], allAgents: [created] })
     apiCreateMock.mockResolvedValue({ agent: created })
     apiUpdateMock.mockResolvedValue({ agent: created })
@@ -233,16 +234,20 @@ describe('AgentManager', () => {
       source: 'projectSettings',
       model: 'provider/custom-model',
       modelDisplay: 'provider/custom-model',
-      tools: ['Agent(worker, researcher)', 'Read'],
+      tools: ['Read', 'Agent(worker, researcher)'],
       color: 'purple',
     })
     apiListMock
-      .mockResolvedValueOnce(EMPTY_RESPONSE)
-      .mockResolvedValueOnce({ activeAgents: [created], allAgents: [created] })
+      .mockResolvedValueOnce({ ...EMPTY_RESPONSE, availableTools: ['Read', 'Grep', 'Bash'] })
+      .mockResolvedValueOnce({
+        activeAgents: [created],
+        allAgents: [created],
+        availableTools: ['Read', 'Grep', 'Bash'],
+      })
     apiCreateMock.mockResolvedValue({ agent: created })
 
     render(<AgentManager />)
-    await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useAgentStore.getState().availableTools).toContain('Read'))
     fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
     fireEvent.click(screen.getByRole('button', { name: 'Project' }))
     expect(screen.getByText('Target project: /workspace/project')).toBeInTheDocument()
@@ -253,8 +258,9 @@ describe('AgentManager', () => {
     fireEvent.change(screen.getByLabelText(/^Custom model ID/), { target: { value: 'provider/custom-model' } })
     chooseAgentSelect('Reasoning effort', 'xhigh')
     chooseAgentSelect('Tools', 'Custom list')
-    fireEvent.change(screen.getByLabelText(/^Allowed tools/), {
-      target: { value: 'Agent(worker, researcher), Read, Agent(worker, researcher)' },
+    fireEvent.click(screen.getByRole('checkbox', { name: /Read/ }))
+    fireEvent.change(screen.getByLabelText('Other tool names or permission patterns'), {
+      target: { value: 'Agent(worker, researcher), Agent(worker, researcher)' },
     })
     chooseAgentSelect('Color', 'purple')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -267,12 +273,56 @@ describe('AgentManager', () => {
       systemPrompt: 'Review carefully.',
       model: 'provider/custom-model',
       effort: 'xhigh',
-      tools: ['Agent(worker, researcher)', 'Read'],
+      tools: ['Read', 'Agent(worker, researcher)'],
       color: 'purple',
     }))
     expect(apiReloadMock).toHaveBeenCalledWith('session-1')
     expect(await screen.findByText('Agent Profile')).toBeInTheDocument()
     expect(useAgentStore.getState().selectedAgent).toEqual(created)
+  })
+
+  it('lets users discover and select built-in tools without memorizing their names', async () => {
+    const created = makeAgent({
+      tools: ['Read', 'Grep', 'mcp__docs__search', 'Bash(git:*)'],
+    })
+    apiListMock
+      .mockResolvedValueOnce({
+        ...EMPTY_RESPONSE,
+        availableTools: ['Read', 'Grep', 'Bash', 'Edit'],
+      })
+      .mockResolvedValueOnce({
+        activeAgents: [created],
+        allAgents: [created],
+        availableTools: ['Read', 'Grep', 'Bash', 'Edit'],
+      })
+    apiCreateMock.mockResolvedValue({ agent: created })
+
+    render(<AgentManager />)
+    await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'code_reviewer' } })
+    fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Review code' } })
+    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Review carefully.' } })
+    chooseAgentSelect('Tools', 'Custom list')
+
+    expect(screen.getByText('Built-in tools')).toBeInTheDocument()
+    expect(screen.getByText('Read files and directories')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search tools'), { target: { value: 'search files' } })
+    expect(screen.getByRole('checkbox', { name: /Grep/ })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /Edit/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search tools'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Read/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Grep/ }))
+    fireEvent.change(screen.getByLabelText('Other tool names or permission patterns'), {
+      target: { value: 'mcp__docs__search, Bash(git:*)' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(apiCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: ['Read', 'Grep', 'mcp__docs__search', 'Bash(git:*)'],
+      }),
+    ))
   })
 
   it('uses the source project when the active worktree is no longer available', async () => {
@@ -395,12 +445,16 @@ describe('AgentManager', () => {
   it('preserves an explicit empty tools list when editing only the description', async () => {
     const agent = makeAgent({ tools: [] })
     const updated = makeAgent({ tools: [], description: 'Updated review' })
-    apiListMock.mockResolvedValue({ activeAgents: [updated], allAgents: [updated] })
+    apiListMock.mockResolvedValue({
+      activeAgents: [updated],
+      allAgents: [updated],
+      availableTools: ['Read'],
+    })
     apiUpdateMock.mockResolvedValue({ agent: updated })
     useAgentStore.setState({ selectedAgent: agent, activeAgents: [agent], allAgents: [agent] })
 
     render(<AgentManager />)
-    await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useAgentStore.getState().availableTools).toContain('Read'))
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
     expect(screen.getByRole('button', { name: 'Tools' })).toHaveTextContent('No tools')
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Updated review' } })
@@ -417,15 +471,20 @@ describe('AgentManager', () => {
     const originalTools = ['Agent(worker, researcher)', 'Read']
     const agent = makeAgent({ tools: originalTools })
     const updated = makeAgent({ tools: originalTools, description: 'Updated review' })
-    apiListMock.mockResolvedValue({ activeAgents: [updated], allAgents: [updated] })
+    apiListMock.mockResolvedValue({
+      activeAgents: [updated],
+      allAgents: [updated],
+      availableTools: ['Read'],
+    })
     apiUpdateMock.mockResolvedValue({ agent: updated })
     useAgentStore.setState({ selectedAgent: agent, activeAgents: [agent], allAgents: [agent] })
 
     render(<AgentManager />)
-    await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(useAgentStore.getState().availableTools).toContain('Read'))
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(screen.getByLabelText(/^Allowed tools/)).toHaveValue(
-      'Agent(worker, researcher), Read',
+    expect(screen.getByRole('checkbox', { name: /Read/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByLabelText('Other tool names or permission patterns')).toHaveValue(
+      'Agent(worker, researcher)',
     )
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Updated review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -529,7 +588,7 @@ describe('AgentManager', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'The change was saved, but the latest agent configuration could not be fully applied.',
     )
-    expect(screen.getByRole('status')).toHaveTextContent('Refresh unavailable')
+    expect(screen.getByRole('status')).not.toHaveTextContent('Refresh unavailable')
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(2))
     expect(apiReloadMock).toHaveBeenCalledWith('session-1')
@@ -544,8 +603,19 @@ describe('AgentManager', () => {
     fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Review carefully.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Agent already exists')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to save agent')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Agent already exists')
     expect(apiCreateMock.mock.calls[0]?.[0]).not.toHaveProperty('tools')
     expect(screen.getByRole('dialog', { name: 'Create Agent' })).toBeInTheDocument()
+  })
+
+  it('localizes load failures without exposing raw server errors', async () => {
+    useSettingsStore.setState({ locale: 'zh' })
+    apiListMock.mockRejectedValue(new Error('HTTP 500: internal agent path leaked'))
+
+    render(<AgentManager />)
+
+    expect(await screen.findByText('加载 Agent 失败')).toBeInTheDocument()
+    expect(screen.queryByText(/internal agent path leaked/)).not.toBeInTheDocument()
   })
 })

@@ -11,6 +11,7 @@ import {
   createCustomPetCatalogLoader,
   createCustomPetFromImage,
   ensureCustomPetsRoot,
+  getPetPackageErrorCode,
   loadCustomPets,
   resolveCustomPetsRoot,
   type CustomPetLoadResult,
@@ -448,12 +449,16 @@ describe('createCustomPetFromImage', () => {
       webpHeader(CUSTOM_PET_SINGLE_IMAGE_MAX_DIMENSION + 1, 64),
     )
 
-    await expect(createCustomPetFromImage({
+    const geometryError = await createCustomPetFromImage({
       slug: 'huge-image',
       displayName: 'Huge Image',
       description: 'Too large.',
       imagePath: hugeImagePath,
-    }, { root })).rejects.toThrow('between 32 and 4096 pixels')
+    }, { root }).then(() => null, error => error)
+    expect(geometryError).toBeInstanceOf(Error)
+    expect((geometryError as Error).message).toContain('between 32 and 4096 pixels')
+    expect(getPetPackageErrorCode(geometryError)).toBe('invalid-image-dimensions')
+    expect(getPetPackageErrorCode(new Error('unexpected'))).toBe('io-error')
     expect(fs.existsSync(path.join(root, 'huge-image'))).toBe(false)
 
     await expect(createCustomPetFromImage({

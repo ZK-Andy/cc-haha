@@ -254,6 +254,10 @@ describe('Agents API Markdown CRUD', () => {
       `/api/agents?cwd=${encodeURIComponent(projectCwd)}`,
     )
     expect(userList.status).toBe(200)
+    expect(userList.data.availableTools).toEqual(
+      expect.arrayContaining(['Read', 'Grep', 'Bash']),
+    )
+    expect(userList.data.availableTools).not.toContain('Agent')
     expect(userList.data.activeAgents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

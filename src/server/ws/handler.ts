@@ -144,10 +144,10 @@ export type SessionChatActivityState =
 
 /**
  * Pet/activity status deliberately reuses the authoritative WebSocket turn and
- * permission state above. Only terminal outcomes and the legacy REST queue
- * fallback need their own memory; waiting/running are derived live.
+ * permission state above. Only failures and the legacy REST queue fallback
+ * need their own memory; successful completion returns directly to idle.
  */
-const terminalSessionChatStates = new Map<string, 'failed' | 'review'>()
+const terminalSessionChatStates = new Map<string, 'failed'>()
 const legacyQueuedSessionChats = new Set<string>()
 const interruptedSessionChats = new Set<string>()
 
@@ -176,11 +176,9 @@ function settleSessionChatActivity(sessionId: string, cliMsg: any): void {
     return
   }
 
-  // A successful turn only needs review while a full client still has the
-  // session open. The pet observes historical sessions independently, so a
-  // sticky review marker here would keep a closed/completed tab in its badge.
-  if (hasActiveFullClients(sessionId)) terminalSessionChatStates.set(sessionId, 'review')
-  else terminalSessionChatStates.delete(sessionId)
+  // A successful result is complete. Keeping the tab open does not imply that
+  // the user has an outstanding review action.
+  terminalSessionChatStates.delete(sessionId)
 }
 
 type CliBackgroundTaskLifecycle = {
@@ -347,10 +345,6 @@ export type WebSocketData = {
 const activeSessions = new Map<string, Set<ServerWebSocket<WebSocketData>>>()
 let activePetClient: ServerWebSocket<WebSocketData> | null = null
 
-function hasActiveFullClients(sessionId: string): boolean {
-  return Array.from(activeSessions.get(sessionId) ?? [])
-    .some((client) => client.data.clientKind !== 'pet')
-}
 const clientOutputCallbacks = new Map<
   ServerWebSocket<WebSocketData>,
   {
@@ -536,16 +530,6 @@ export const handleWebSocket = {
       return
     }
     removeClientOutputCallback(ws)
-
-    // Closing the last full session tab acknowledges a successful completed
-    // turn even when the read-only pet client remains connected. Preserve
-    // failed states so the pet can continue surfacing work that needs attention.
-    if (
-      !hasActiveFullClients(sessionId) &&
-      terminalSessionChatStates.get(sessionId) === 'review'
-    ) {
-      terminalSessionChatStates.delete(sessionId)
-    }
 
     if (hasActiveClients(sessionId)) {
       return

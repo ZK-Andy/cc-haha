@@ -68,6 +68,7 @@ describe('agentStore', () => {
     useAgentStore.setState({
       activeAgents: [],
       allAgents: [],
+      availableTools: [],
       isLoading: false,
       isMutating: false,
       error: null,

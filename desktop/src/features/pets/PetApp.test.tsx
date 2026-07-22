@@ -193,6 +193,27 @@ describe('PetApp', () => {
     })
   })
 
+  it('hides the whole task surface when an older server reports only completed review markers', async () => {
+    mocks.chats = {
+      'session-running': chat('idle', 'The build is done.'),
+      'session-idle': chat('idle', 'The atlas is ready.'),
+    }
+    mocks.getChatStatus.mockResolvedValue({ state: 'idle', activityState: 'review' })
+    render(<PetApp />)
+
+    expect(await screen.findByRole('button', { name: 'pet.window.interact' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.getChatStatus).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(screen.queryByText('Build pet window')).not.toBeInTheDocument()
+    expect(screen.queryByText('Review animation')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('pet.window.expandTasks:2')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.setInteractiveRegions.mock.calls.at(-1)?.[0]).toHaveLength(1)
+    })
+  })
+
   it('shows only active session work and opens the task from the whole row', async () => {
     render(<PetApp />)
 
@@ -217,20 +238,18 @@ describe('PetApp', () => {
     expect(mocks.focusSession).toHaveBeenCalledWith('session-running')
   })
 
-  it('shows a vertical list for every non-idle session when expanded', async () => {
+  it('hides legacy review sessions while keeping real active work visible', async () => {
     mocks.getChatStatus.mockImplementation(async (sessionId: string) => ({
       state: 'thinking',
       activityState: sessionId === 'session-idle' ? 'review' : 'running',
     }))
     render(<PetApp />)
 
-    const reviewRow = await screen.findByRole('button', {
-      name: 'Review animation, pet.window.status.review',
+    await screen.findByRole('button', {
+      name: 'Build pet window, pet.window.status.running',
     })
-    expect(screen.getAllByRole('listitem')).toHaveLength(2)
-
-    fireEvent.click(reviewRow)
-    expect(mocks.focusSession).toHaveBeenCalledWith('session-idle')
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.queryByText('Review animation')).not.toBeInTheDocument()
   })
 
   it('shows every active task and returns the card to its badge from the chevron', async () => {

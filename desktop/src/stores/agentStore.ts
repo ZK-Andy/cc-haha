@@ -12,6 +12,7 @@ export type AgentDetailReturnTab = 'agents' | 'plugins'
 type AgentStore = {
   activeAgents: AgentDefinition[]
   allAgents: AgentDefinition[]
+  availableTools: string[]
   isLoading: boolean
   isMutating: boolean
   error: string | null
@@ -46,6 +47,7 @@ let latestFetchRequestId = 0
 export const useAgentStore = create<AgentStore>((set, get) => ({
   activeAgents: [],
   allAgents: [],
+  availableTools: [],
   isLoading: false,
   isMutating: false,
   error: null,
@@ -64,7 +66,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       mutationWarning: null,
     })
     try {
-      const { activeAgents, allAgents } = await agentsApi.list(cwd)
+      const { activeAgents, allAgents, availableTools = [] } = await agentsApi.list(cwd)
       if (requestId !== latestFetchRequestId) return
       set((state) => {
         const selectedAgent = state.selectedAgent
@@ -73,6 +75,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         return {
           activeAgents,
           allAgents,
+          availableTools,
           isLoading: false,
           selectedAgent,
           selectedAgentReturnTab: selectedAgent ? state.selectedAgentReturnTab : 'agents',
